@@ -50,7 +50,7 @@ def r_soi(M, m, r):
     return r * (m / M) ** (2 / 5)
 
 def magnitude(vector):
-    return np.sqrt(sum(pow(element, 2) for element in vector))
+    return np.linalg.norm(vector)
 
 def eccentricity_vector(r_vector, v_vector, h_vector, mu):
     return np.cross(v_vector, h_vector) / mu - r_vector / magnitude(r_vector)
@@ -64,9 +64,9 @@ def true_2_eccentric_anom(true_anom, ecc):
 def model_2BP(state, t, M_primary):
     mu = G * 1e-9 * M_primary  # Gravitational parameter  [km^3/s^2]
     x, y, z, x_dot, y_dot, z_dot = state
-    x_ddot = -mu * x / (x**2 + y**2 + z**2) ** (3 / 2)
-    y_ddot = -mu * y / (x**2 + y**2 + z**2) ** (3 / 2)
-    z_ddot = -mu * z / (x**2 + y**2 + z**2) ** (3 / 2)
+    x_ddot = -mu * x / magnitude(np.array([x, y, z])) ** 3
+    y_ddot = -mu * y / magnitude(np.array([x, y, z])) ** 3
+    z_ddot = -mu * z / magnitude(np.array([x, y, z])) ** 3
     return [x_dot, y_dot, z_dot, x_ddot, y_ddot, z_ddot]
 
 def kep_2_cart(a, e, i, arg_peri, long_asc, ecc_anom, mu):
@@ -89,8 +89,8 @@ def cart_2_kep(position, velocity, mu):
     h = np.linalg.norm(h_vector)
     r = np.linalg.norm(position)
     v = np.linalg.norm(velocity)
-    energy = 0.5 * v**2 - mu / r
-    a = -mu / (2 * energy)
+    specific_energy = 0.5 * v**2 - mu / r
+    a = -mu / (2 * specific_energy)
     e = np.sqrt(1 - h**2 / (a * mu))
     e_vector = eccentricity_vector(position, velocity, h_vector, mu)
     inclination = np.arccos(h_vector[2] / h)
@@ -100,7 +100,7 @@ def cart_2_kep(position, velocity, mu):
     nu = np.arctan2(np.sqrt(p / mu) * np.dot(position, velocity), p - r)
     arg_periapsis = lat - nu
     ecc_anom = 2 * np.arctan(np.sqrt((1 - e) / (1 + e)) * np.tan(nu / 2))
-    return a, e, e_vector, magnitude(h_vector), h_vector, inclination, arg_periapsis, long_asc, ecc_anom, energy
+    return a, e, e_vector, magnitude(h_vector), h_vector, inclination, arg_periapsis, long_asc, ecc_anom, specific_energy
 
 class Apsis:
     def __init__(self, apse):
@@ -121,7 +121,7 @@ class OrbitalProperties:
             self.e = 0.0
             self.T = period(self.a, system.mass)
             self.h = self.a * visviva(system.mass, self.a, self.a)
-            self.energy = -G * system.mass / (2 * self.a)
+            self.energy = - G * system.mass / (2 * self.a)
         elif source == "ellipse":
             self.orbit = "Elliptical"
             if mode == "apses":
@@ -133,7 +133,7 @@ class OrbitalProperties:
                 self.e = (r_apo - r_peri) / (2 * self.a)
                 self.T = period(self.a, primary.mass)
                 self.h = np.sqrt(G * primary.mass * self.secondary_mass**2 * self.a * (1 - self.e**2))
-                self.energy = -G * primary.mass * self.secondary_mass / (2 * self.a)
+                self.energy = - G * primary.mass * self.secondary_mass / (2 * self.a)
             else:
                 raise NotImplementedError
         elif source == "parabolic":
@@ -165,7 +165,7 @@ class OrbitalProperties:
                     t = np.linspace(0, guess, 500000)
                     sol = odeint(model_2BP, np.array(initial_conds)*1e-3, t, args=(self.about.mass, ))
                     x, y, z, vx, vy, vz = sol[:, 0], sol[:, 1], sol[:, 2], sol[:, 3], sol[:, 4], sol[:, 5]
-                    r = np.sqrt(x**2 + y**2 + z**2)
+                    r = magnitude(np.array([x, y, z]))
                     if r.argmin() == len(t) - 1:
                         guess += 20 * 24 * 60**2
                         continue
@@ -200,6 +200,7 @@ class OrbitalProperties:
             else:
                 self.orbit = "Error determining orbit type"
                 self.T = "Error"
+            self.energy = - G * self.about.mass * secondary_mass / (2 * self.a)
         else:
             raise NotImplementedError
         if source != "state vectors":
@@ -213,6 +214,7 @@ class OrbitalProperties:
         return f"{self.orbit} orbit with semi-major axis {round(self.a * 1e-3, 1)}km and eccentricity {round(self.e, 1)}"
 
     def __periapsis__(self):
+        # Create Apsis object for the point in trajectory closest to orbited body
         if self.orbit == "Parabolic":
             r_peri = self.h**2 / (2 * G * (self.about.mass + self.secondary_mass))
             return Apsis({"distance":r_peri, "velocity":visviva(self.about.mass, r_peri, self.a)})
@@ -224,9 +226,11 @@ class OrbitalProperties:
             return Apsis({"distance":r_peri, "velocity":visviva(self.about.mass, r_peri, self.a)})
 
     def __apoapsis__(self):
+        # Create Apsis object for the point in trajectory furthest from orbited body
         if self.orbit == "Parabolic":
             return Apsis({"distance":self.a, "velocity":0})
         elif self.orbit == "Hyperbolic":
+            # Hyperbolic trajectories do not have a finite apoapsis, the velocity then becomes the hyperbolic excess velocity
             return Apsis({"distance":np.inf, "velocity":self.v_inf})
         else:
             r_apo = self.a * (1 + self.e)
@@ -263,7 +267,7 @@ class OrbitalProperties:
         return self
     
     def escape_SOI(self, excess=None):
-        assert self.orbit == "Circular"
+        if self.orbit != "Circular": raise NotImplementedError
         if self.about.primary.name == "Sun": return self.velocity() * np.sqrt(2)
         return self.velocity() + hohmann(self.a, self.about.SOI, self.about.mass)
 
@@ -295,6 +299,7 @@ class Body:
         return self.eccentric_anomaly() - self.orbit.e * np.sin(self.eccentric_anomaly())
     
     def apply_state_vectors(self, *line):
+        # forwards the position and velocity vectors from a specified row of simulated data updating the current state of a Body object
         if len(line) == 0:
             self.orbit = self.orbit.apply_state_vectors(-1)
         elif type(line[0]) is int:
@@ -322,8 +327,8 @@ class System:
         self.satellites[body].SOI = r_soi(self.primary.mass, self.satellites[body].mass, self.satellites[body].orbit.a)
         return self
 
-    def define_planet_vectors(self, body, a, e, i, arg_peri, long_asc, ecc_anom):
-        self.satellites[body].orbit = OrbitalProperties("state vectors", (self, *kep_2_cart(a, e, i, arg_peri, long_asc, ecc_anom, G * self.mass)))
+    def define_planet_vectors(self, body, a, e, inclination, arg_periapsis, long_asc_node, ecc_anom):
+        self.satellites[body].orbit = OrbitalProperties("state vectors", (self, *kep_2_cart(a, e, inclination, arg_periapsis, long_asc_node, ecc_anom, G * self.mass)), secondary_mass=self.satellites[body].mass)
         self.satellites[body].SOI = r_soi(self.primary.mass, self.satellites[body].mass, self.satellites[body].orbit.a)
         return self
 
@@ -386,9 +391,7 @@ class Simulate:
             self.primary.orbit.velocity = np.array([primary_sol[:, 3], primary_sol[:, 4], primary_sol[:, 5]])
             # Scan for an encounter with the primary
             if hasattr(self, "probe"):
-                probe_x, probe_y, probe_z = self.probe.orbit.position
-                primary_x, primary_y, primary_z = self.primary.orbit.position
-                r = np.sqrt((probe_x - primary_x)**2 + (probe_y - primary_y)**2 + (probe_z - primary_z)**2)   
+                r = magnitude(self.probe.orbit.position - self.primary.orbit.position)
                 if r.min() <= self.primary.SOI:
                     minima = argrelmin(np.where(r > self.primary.SOI, r - self.primary.SOI, r + self.primary.SOI))[0]
                     time_of_encounter = self.t[minima[0]] / 24 / 60**2
@@ -402,9 +405,7 @@ class Simulate:
             self.secondary.orbit.velocity = np.array([secondary_sol[:, 3], secondary_sol[:, 4], secondary_sol[:, 5]])
             # Scan for an encounter with the secondary
             if hasattr(self, "probe"):
-                probe_x, probe_y, probe_z = self.probe.orbit.position
-                secondary_x, secondary_y, secondary_z = self.secondary.orbit.position
-                r = np.sqrt((probe_x - secondary_x)**2 + (probe_y - secondary_y)**2 + (probe_z - secondary_z)**2)
+                r = magnitude(self.probe.orbit.position - self.secondary.orbit.position)
                 if r.min() <= self.secondary.SOI:
                     minima = argrelmin(np.where(r < self.secondary.SOI, r + self.secondary.SOI, r))[0]
                     time_of_encounter = self.t[minima[0]] / 24 / 60**2
@@ -414,12 +415,13 @@ class Simulate:
         return self
     
     def relative_approach_parameters(self, body1, body2):
+        # When finished, should calculate the relative approach parameters of two bodies encountering each other upon intersecting SOI's
         pass
             
-    def plot_simulation(self, scale="AU", x_window=None, y_window=None, z_window=None, encounter=None, markevery=None):
+    def plot_simulation(self, scale="AU", timestep="days", x_window=None, y_window=None, z_window=None, encounter=None, markevery=None):
         assert len(self.primary.orbit.position != 3)
         plt.close()
-        plot_multi_simulation(self, scale=scale, x_window=x_window, y_window=y_window, z_window=z_window, encounter=encounter, markevery=markevery)
+        plot_multi_simulation(self, scale=scale, x_window=x_window, y_window=y_window, z_window=z_window, encounter=encounter, timestep=timestep, markevery=markevery)
 
 def create_simple_system():
     Sun = Body("Sun", sun["mass"], sun["radius"])

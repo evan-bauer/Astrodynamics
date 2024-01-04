@@ -12,42 +12,45 @@ def reduced_mass(M, m):
     return (M * m) / (M + m)
 
 def U_gravitational(r, M, m):
-    return -G * M * m / r
-
+    return - G * M * m / r
+    
 def U_centrifugal(r, M, m, h):
-    return h**2 / (2 * reduced_mass(M, m) * r**2)
+    return (reduced_mass(M, m) * h)**2 / (2 * reduced_mass(M, m) * r**2)
 
 def U_effective(r, M, m, h):
     return U_gravitational(r, M, m) + U_centrifugal(r, M, m, h)
 
-def plot_energy(obj, y_window=1e13, r_max=1e8):
-    plt.style.use('default')
-    if y_window == None: y_window = 1e13
-    
+def plot_energy(obj, y_window=None, r_max=1e8):
+    plt.style.use('default')    
     # CREATE AXES
     fig, ax = plt.figure(figsize=(6, 6)), plt.axes()
     r_peri, r_apo = obj.periapsis.distance, obj.apoapsis.distance
-    if np.isinf(obj.T):
+    if np.isinf(r_apo):
         if r_max == None: r_max = 1e8
-        r = np.linspace(10, r_max * 1.1)
-        rs = np.linspace(r_peri, r_max * 1.1)
+        r, rs = np.linspace(10, r_max * 1.1), np.linspace(r_peri, r_max * 1.1)
     else:
-        r = np.linspace(10, r_apo * 1.1)
-        rs = np.linspace(r_peri, r_apo)
-    r_0 = r[U_effective(r, obj.about.mass, obj.secondary_mass, obj.h).argmin()]
+        r, rs = np.linspace(10, r_apo * 1.1), np.linspace(r_peri, r_apo)
+    U_eff = U_effective(r, obj.about.mass, obj.secondary_mass, obj.h)
+    r_0 = r[U_eff.argmin()]
+    ax.grid()
     ax.plot(r, U_gravitational(r, obj.about.mass, obj.secondary_mass), c='r', label=r'$U_{grav}$')
     ax.plot(r, U_centrifugal(r, obj.about.mass, obj.secondary_mass, obj.h), c='g', label=r'$U_{cf}$')
-    ax.plot(r, U_effective(r, obj.about.mass, obj.secondary_mass, obj.h), c='b', label=r'$U_{eff}$')
+    ax.plot(r, U_eff, c='b', label=r'$U_{eff}$')
     ax.axhline(obj.energy, c='k', label=r"$E$")
     ax.axvline(r_peri, dashes=(1, 1), c='orange', label=r"$r_{peri}$")
     ax.axvline(r_apo, dashes=(1, 1), c='cyan', label=r"$r_{apo}$") if not r_apo == np.inf else None
-    ax.axvline(r_0, c='magenta', dashes=(1, 1), label=r"$r_{circ}$")
+    ax.axvline(r_0, dashes=(1, 1), c='magenta', label=r"$r_{circ}$")
+    
     ax.set_title(f"Effective Potential of {obj}")
     ax.set_xlabel(r"Radial Distance (m)")
     ax.set_ylabel(r"Effective Potential")
-    ax.grid()
+    
     ax.set_xlim(0,  r.max())
-    ax.set_ylim(-y_window, y_window)
+    if type(y_window) == list:
+        ax.set_ylim(*y_window)
+    elif type(y_window) == int:
+        ax.set_ylim(-y_window, y_window)
+
     ax.fill_between(rs, np.zeros_like(rs) + obj.energy, U_effective(rs, obj.about.mass, obj.secondary_mass, obj.h), alpha=.25)
     if np.isinf(r_apo):
         ax.set_xticks([0, r_peri, r_0, r.max()], [0, r"$r_{peri}$", r"$r_{circ}$", "max"])
@@ -57,7 +60,7 @@ def plot_energy(obj, y_window=1e13, r_max=1e8):
     plt.legend(loc='upper right')
     plt.show()
 
-def plot_multi_simulation(sim_obj, scale="AU", x_window=None, y_window=None, z_window=None, encounter=None, markevery=None):
+def plot_multi_simulation(sim_obj, scale="AU", x_window=None, y_window=None, z_window=None, encounter=None, timestep=None, markevery=None):
     scale_factor = 1e3                        # m -> km
     if scale == "AU": scale_factor = AU       # m -> AU
         
@@ -113,12 +116,14 @@ def plot_multi_simulation(sim_obj, scale="AU", x_window=None, y_window=None, z_w
     ax4.fill_between(x_sun, -y_sun, y_sun, color='orange')
 
     # PLOT PREDICTED SECONDARY TRAJECTORY
+    end = -1 if encounter == None else encounter
+    time = sim_obj.t[:end:markevery] / (24 * 3600)
     if hasattr(sim_obj, "secondary"):
-        p_secondary = ax1.scatter(sim_obj.secondary.orbit.position[0][::markevery] / scale_factor, sim_obj.secondary.orbit.position[1][::markevery] / scale_factor, c=sim_obj.t[::markevery] / (24 * 3600), cmap="cool", s=2)
-        ax2.scatter(sim_obj.secondary.orbit.position[2][::markevery] / scale_factor, sim_obj.secondary.orbit.position[1][::markevery] / scale_factor, c=sim_obj.t[::markevery] / (24 * 3600), cmap="cool", s=2)
-        ax3.scatter(sim_obj.secondary.orbit.position[0][::markevery] / scale_factor, sim_obj.secondary.orbit.position[2][::markevery] / scale_factor, c=sim_obj.t[::markevery] / (24 * 3600), cmap="cool", s=2)
-        ax4.scatter(sim_obj.secondary.orbit.position[2][::markevery] / scale_factor, sim_obj.secondary.orbit.position[1][::markevery] / scale_factor, c=sim_obj.t[::markevery] / (24 * 3600), cmap="cool", s=2)
-        fig.colorbar(p_secondary, ax=axes, orientation="horizontal", label='Secondary', fraction=.0335)    
+        p_secondary = ax1.scatter(sim_obj.secondary.orbit.position[0][:end:markevery] / scale_factor, sim_obj.secondary.orbit.position[1][:end:markevery] / scale_factor, c=time, cmap="cool", s=2)
+        ax2.scatter(sim_obj.secondary.orbit.position[2][:end:markevery] / scale_factor, sim_obj.secondary.orbit.position[1][:end:markevery] / scale_factor, c=time, cmap="cool", s=2)
+        ax3.scatter(sim_obj.secondary.orbit.position[0][:end:markevery] / scale_factor, sim_obj.secondary.orbit.position[2][:end:markevery] / scale_factor, c=time, cmap="cool", s=2)
+        ax4.scatter(sim_obj.secondary.orbit.position[2][:end:markevery] / scale_factor, sim_obj.secondary.orbit.position[1][:end:markevery] / scale_factor, c=time, cmap="cool", s=2)
+        fig.colorbar(p_secondary, ax=axes, orientation="horizontal", label=f"Secondary position after X {timestep}", fraction=.0335)    
         
         # SECONDARY SOI
         soi = sim_obj.secondary.SOI
@@ -128,11 +133,11 @@ def plot_multi_simulation(sim_obj, scale="AU", x_window=None, y_window=None, z_w
         z_soi_secondary_initial_cos = (soi * cos + sim_obj.secondary.orbit.position[2][0]) / scale_factor
         z_soi_secondary_initial_sin = (soi * sin + sim_obj.secondary.orbit.position[2][0]) / scale_factor
         
-        x_soi_secondary_final_cos = (soi * cos + sim_obj.secondary.orbit.position[0][-1 if encounter == None else encounter]) / scale_factor
-        y_soi_secondary_final_cos = (soi * cos + sim_obj.secondary.orbit.position[1][-1 if encounter == None else encounter]) / scale_factor
-        y_soi_secondary_final_sin = (soi * sin + sim_obj.secondary.orbit.position[1][-1 if encounter == None else encounter]) / scale_factor
-        z_soi_secondary_final_cos = (soi * cos + sim_obj.secondary.orbit.position[2][-1 if encounter == None else encounter]) / scale_factor
-        z_soi_secondary_final_sin = (soi * sin + sim_obj.secondary.orbit.position[2][-1 if encounter == None else encounter]) / scale_factor
+        x_soi_secondary_final_cos = (soi * cos + sim_obj.secondary.orbit.position[0][end]) / scale_factor
+        y_soi_secondary_final_cos = (soi * cos + sim_obj.secondary.orbit.position[1][end]) / scale_factor
+        y_soi_secondary_final_sin = (soi * sin + sim_obj.secondary.orbit.position[1][end]) / scale_factor
+        z_soi_secondary_final_cos = (soi * cos + sim_obj.secondary.orbit.position[2][end]) / scale_factor
+        z_soi_secondary_final_sin = (soi * sin + sim_obj.secondary.orbit.position[2][end]) / scale_factor
 
         ax1.plot(x_soi_secondary_initial_cos, y_soi_secondary_initial_sin, color='magenta', dashes=(1, 1))
         ax1.plot(x_soi_secondary_final_cos, y_soi_secondary_final_sin, color='red', dashes=(1, 1))
@@ -148,11 +153,11 @@ def plot_multi_simulation(sim_obj, scale="AU", x_window=None, y_window=None, z_w
 
     # PLOT PREDICTED PRIMARY TRAJECTORY
     if hasattr(sim_obj, "primary"):
-        p_primary = ax1.scatter(sim_obj.primary.orbit.position[0][::markevery] / scale_factor, sim_obj.primary.orbit.position[1][::markevery] / scale_factor, c=sim_obj.t[::markevery] / (24 * 3600), cmap="spring", s=2)
-        ax2.scatter(sim_obj.primary.orbit.position[2][::markevery] / scale_factor, sim_obj.primary.orbit.position[1][::markevery] / scale_factor, c=sim_obj.t[::markevery] / (24 * 3600), cmap="spring", s=2)
-        ax3.scatter(sim_obj.primary.orbit.position[0][::markevery] / scale_factor, sim_obj.primary.orbit.position[2][::markevery] / scale_factor, c=sim_obj.t[::markevery] / (24 * 3600), cmap="spring", s=2)
-        ax4.scatter(sim_obj.primary.orbit.position[2][::markevery] / scale_factor, sim_obj.primary.orbit.position[1][::markevery] / scale_factor, c=sim_obj.t[::markevery] / (24 * 3600), cmap="spring", s=2)
-        fig.colorbar(p_primary, ax=axes, orientation="horizontal", label='Primary', fraction=.04075)    
+        p_primary = ax1.scatter(sim_obj.primary.orbit.position[0][:end:markevery] / scale_factor, sim_obj.primary.orbit.position[1][:end:markevery] / scale_factor, c=time, cmap="spring", s=2)
+        ax2.scatter(sim_obj.primary.orbit.position[2][:end:markevery] / scale_factor, sim_obj.primary.orbit.position[1][:end:markevery] / scale_factor, c=time, cmap="spring", s=2)
+        ax3.scatter(sim_obj.primary.orbit.position[0][:end:markevery] / scale_factor, sim_obj.primary.orbit.position[2][:end:markevery] / scale_factor, c=time, cmap="spring", s=2)
+        ax4.scatter(sim_obj.primary.orbit.position[2][:end:markevery] / scale_factor, sim_obj.primary.orbit.position[1][:end:markevery] / scale_factor, c=time, cmap="spring", s=2)
+        fig.colorbar(p_primary, ax=axes, orientation="horizontal", label=f"Primary position after X {timestep}", fraction=.04075)    
 
         # PRIMARY SOI
         soi = sim_obj.primary.SOI
@@ -162,11 +167,11 @@ def plot_multi_simulation(sim_obj, scale="AU", x_window=None, y_window=None, z_w
         z_soi_primary_initial_cos = (soi * cos + sim_obj.primary.orbit.position[2][0]) / scale_factor
         z_soi_primary_initial_sin = (soi * sin + sim_obj.primary.orbit.position[2][0]) / scale_factor
         
-        x_soi_primary_final_cos = (soi * cos + sim_obj.primary.orbit.position[0][-1 if encounter == None else encounter]) / scale_factor
-        y_soi_primary_final_cos = (soi * cos + sim_obj.primary.orbit.position[1][-1 if encounter == None else encounter]) / scale_factor
-        y_soi_primary_final_sin = (soi * sin + sim_obj.primary.orbit.position[1][-1 if encounter == None else encounter]) / scale_factor
-        z_soi_primary_final_cos = (soi * cos + sim_obj.primary.orbit.position[2][-1 if encounter == None else encounter]) / scale_factor
-        z_soi_primary_final_sin = (soi * sin + sim_obj.primary.orbit.position[2][-1 if encounter == None else encounter]) / scale_factor
+        x_soi_primary_final_cos = (soi * cos + sim_obj.primary.orbit.position[0][end]) / scale_factor
+        y_soi_primary_final_cos = (soi * cos + sim_obj.primary.orbit.position[1][end]) / scale_factor
+        y_soi_primary_final_sin = (soi * sin + sim_obj.primary.orbit.position[1][end]) / scale_factor
+        z_soi_primary_final_cos = (soi * cos + sim_obj.primary.orbit.position[2][end]) / scale_factor
+        z_soi_primary_final_sin = (soi * sin + sim_obj.primary.orbit.position[2][end]) / scale_factor
         
         ax1.plot(x_soi_primary_initial_cos, y_soi_primary_initial_sin, color='magenta', dashes=(1, 1))
         ax1.plot(x_soi_primary_final_cos, y_soi_primary_final_sin, color='red', dashes=(1, 1))
@@ -182,11 +187,11 @@ def plot_multi_simulation(sim_obj, scale="AU", x_window=None, y_window=None, z_w
         
     # PLOT PREDICTED PROBE TRAJECTORIES AND DEFINE COLORBAR COLORMAP STARTING WITH PROBE AVAILABILITY
     if hasattr(sim_obj, "probe"):
-        p_probe = ax1.scatter(sim_obj.probe.orbit.position[0][::markevery] / scale_factor, sim_obj.probe.orbit.position[1][::markevery] / scale_factor, c=sim_obj.t[::markevery] / (24 * 3600), cmap="viridis", s=2)
-        ax2.scatter(sim_obj.probe.orbit.position[2][::markevery] / scale_factor, sim_obj.probe.orbit.position[1][::markevery] / scale_factor, c=sim_obj.t[::markevery] / (24 * 3600), cmap="viridis", s=2)
-        ax3.scatter(sim_obj.probe.orbit.position[0][::markevery] / scale_factor, sim_obj.probe.orbit.position[2][::markevery] / scale_factor, c=sim_obj.t[::markevery] / (24 * 3600), cmap="viridis", s=2)
-        ax4.scatter(sim_obj.probe.orbit.position[2][::markevery] / scale_factor, sim_obj.probe.orbit.position[1][::markevery] / scale_factor, c=sim_obj.t[::markevery] / (24 * 3600), cmap="viridis", s=2)
-        fig.colorbar(p_probe, ax=axes, orientation="horizontal", label='Probe', fraction=.05)    
+        p_probe = ax1.scatter(sim_obj.probe.orbit.position[0][:end:markevery] / scale_factor, sim_obj.probe.orbit.position[1][:end:markevery] / scale_factor, c=time, cmap="viridis", s=2)
+        ax2.scatter(sim_obj.probe.orbit.position[2][:end:markevery] / scale_factor, sim_obj.probe.orbit.position[1][:end:markevery] / scale_factor, c=time, cmap="viridis", s=2)
+        ax3.scatter(sim_obj.probe.orbit.position[0][:end:markevery] / scale_factor, sim_obj.probe.orbit.position[2][:end:markevery] / scale_factor, c=time, cmap="viridis", s=2)
+        ax4.scatter(sim_obj.probe.orbit.position[2][:end:markevery] / scale_factor, sim_obj.probe.orbit.position[1][:end:markevery] / scale_factor, c=time, cmap="viridis", s=2)
+        fig.colorbar(p_probe, ax=axes, orientation="horizontal", label=f"Probe position after X {timestep}", fraction=.05)    
         
     # DISPLAY WINDOWS
     if not x_window == None:
