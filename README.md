@@ -1,5 +1,4 @@
 # Astrodynamics
-===============
 
 ##### Table of Contents
 - [Astrodynamics](#astrodynamics)
@@ -17,14 +16,14 @@
 
 <small><i><a href='http://ecotrust-canada.github.io/markdown-toc/'>Table of contents generated with markdown-toc</a></i></small>
 
----
-<a name="description"/>
+<a name="description"/> 
+
 ## Description 
 
 Astrodynamics is a small, self-contained set of objects and functions specifically designed for the exploration and modeling of various orbital trajectories and their interactions. Particularly intended for use in a notebook environment, Astrodynamics is especially useful for defining different kinds of orbital trajectories and simulation of the motion of both planets and arbitrary spacecraft. 
 
----
 <a name="introduction"/>
+
 ## Introduction 
 
 This project was first embarked on in the spring of 2022 as part of a final project for one of my physics courses. Having long been curious about the physical mechanics of a spacecraft undergoing a [gravity assist](https://en.wikipedia.org/wiki/Gravity_assist) (like *Voyager*, *MESSENGER*, and *Cassini-Huygens*, to name a few), I wanted to try my hand at modeling the counter-intuitive phenomenon for myself. The very first iteration of this project was a simplified look into the very basics of a gravity assist and thus only considered two dimensions. 
@@ -33,19 +32,20 @@ While two dimensions sufficed for a simple examination of a complex phenomenon a
 
 For cases where a satellite enters or exits the gravitational [sphere of influence](https://en.wikipedia.org/wiki/Sphere_of_influence_(astrodynamics)) of another satellite, the new trajectory of the satellite will be assessed using a [patched conic approximation](https://en.wikipedia.org/wiki/Patched_conic_approximation).
 
----
 <a name="installation"/>
+
 ## Installation 
 
 Astrodynamics' only dependencies are standard Python libraries like NumPy, SciPy, and Matplotlib, so installation is pretty straightforward. Just download `Astrodynamics.py` to the root of your project or use git commands in a terminal. All that's left is to import it into a project.
 
----
 <a name="getting-started"/>
+
 ## Getting started
 
 The easiest way to get started with Astrodynamics is closest to home, with the Earth, Moon, and Sun:
 
 <a name="quick-start"/>
+
 ### Quick start 
 
 There are four shortcut functions to create a system: `solar_system()`, `inner_planets()`, `outer_planets()`, and `earth_moon()`. Each has an optional keyword argument `inclination` for defining a reference plane for the inclination angles[^inclination].
@@ -70,9 +70,10 @@ Now we can simulate the Earth-Moon system for 23 days and plot the motion of the
 ```python
 ems.satellites["Earth"].plot_simulation("planar", scale="Mm")
 ```
-> ![earth_moon_planar](../blob/main/imgs/earth_moon_planar.png)
+> ![earth_moon_planar](imgs/earth_moon_planar.png)
 
 <a name="start-from-scratch"/>
+
 ### Start from scratch
 
 Starting from scratch is understandably more involved than what was discussed in the previous section.
@@ -118,15 +119,15 @@ While the arguments for `Body` and `add_satellite` must be dictionaries, they ar
 ems.satellites["Earth"].simulate(23)
 ems.satellites["Earth"].plot_simulation("3d", scale="Mm")
 ```
-> ![earth_moon_3d](../blob/main/imgs/earth_moon_3d.png)
+> ![earth_moon_3d](imgs/earth_moon_3d.png)
 
 [^inclination]: 
 `"sun_eq"` for inclination relative to the Sun's equator (default)  
 `"ecliptic"` for inclination relative to the [ecliptic](https://en.wikipedia.org/wiki/Ecliptic)  
 `"invariable_plane"` for inclination relative to the [invariable plane](https://en.wikipedia.org/wiki/Invariable_plane)
 
----
 <a name="example-of-an-encounter-with-jupiter"/>
+
 ## Example of an encounter with Jupiter 
 
 To demonstrate how Astrodynamics works with interplanetary encounters, I have manufactured an encounter between Jupiter and an arbitrary probe object with negligible mass.
@@ -149,8 +150,8 @@ enc.satellites["Probe"].set_velocity(np.array([ 8660.62219213, -4696.66266911, 1
 enc.simulate(30, timestep="days")
 enc.plot_simulation('3d')
 ```
-> `Encounter found between Jupiter and Probe at time 28.064806480648063 days`
-> ![samp_enc_3d](../blob/main/imgs/samp_enc_3d.png)
+> Encounter found between Jupiter and Probe at time 28.064806480648063 days
+> ![samp_enc_3d](imgs/samp_enc_3d.png)
 
 With the knowledge that the probe enters Jupiter's sphere of influence shortly after 28 days of simulation time, the simulation automatically stops as soon as there is an encounter, impact, or escape detected (provided all `check_` keyword arguments are `True`). The next step then is to make the patched conic approximation and simulate the hyperbolic trajectory the probe takes around Jupiter:
 
@@ -160,18 +161,18 @@ hyp = encounter(jupiter, probe)
 hyp.simulate(315)
 hyp.satellites["Jupiter"].plot_simulation("3d")
 ```
-> `Satellite Probe escapes primary Jupiter at time 312.2277227722772 days`
-> ![samp_hyp_3d](../blob/main/imgs/samp_hyp_3d.png)
+> Satellite Probe escapes primary Jupiter at time 312.2277227722772 days
+> ![samp_hyp_3d](imgs/samp_hyp_3d.png)
 
 Adjusting the angle of the 3D plot can better display the change in trajectory relative to the Sun:
-> ![samp_hyp_other](../blob/main/imgs/samp_hyp_other.png)
+> ![samp_hyp_other](imgs/samp_hyp_other.png)
 
 An equivalent visualization of this trajectory can be displayed by changing the argument in the `plot_simulation` method:
 
 ```python
 hyp.satellites["Jupiter"].plot_simulation("planar")
 ```
-> ![samp_hyp_planar](../blob/main/imgs/samp_hyp_planar.png)
+> ![samp_hyp_planar](imgs/samp_hyp_planar.png)
 
 Given that the probe escapes Jupiter's SOI, the new trajectory is again determined by making the patched conic approximation:
 
@@ -181,7 +182,7 @@ esc = escape(jupe, probe)
 esc.simulate(400)
 esc.plot_simulation("3d")
 ```
-> ![samp_esc_3d](../blob/main/imgs/samp_esc_3d.png)
+> ![samp_esc_3d](imgs/samp_esc_3d.png)
 
 The difference in the probe's trajectory probably isn't too apparent, considering the initial trajectory was only simulated for a short time and the awkward 3d plot angle from earlier, so here's a comparison of the pre- and post-assist trajectories:
 
@@ -189,10 +190,10 @@ The difference in the probe's trajectory probably isn't too apparent, considerin
 | ---------------- |:--------------------:|:--------------------:| --------------------:|
 | semi-major axis  | 3.99396 AU           |  8.79155 AU          |  4.79759 AU          |
 | eccentricity     | 0.39671194           |  0.41555246          |  0.01884052          |
-| inclination      | 2.6278306$\degree$   |  3.8009806$\degree$  |  1.1731499$\degree$  |
-| arg periapsis    | 257.78166$\degree$   |  109.95140$\degree$  | -147.83026$\degree$  |
-| long. asc. node  | 153.92832$\degree$   |  162.03471$\degree$  |  8.1063864$\degree$  |
-| true anomaly     | 185.93823$\degree$   |  352.03689$\degree$  |  166.09866$\degree$  |
+| inclination      | 2.6278306°           |  3.8009806°          |  1.1731499°          |
+| arg periapsis    | 257.78166°           |  109.95140°          | -147.83026°          |
+| long. asc. node  | 153.92832°           |  162.03471°          |  8.1063864°          |
+| true anomaly     | 185.93823°           |  352.03689°          |  166.09866°          |
 
 To add, the effective potential of any orbital trajectory can also be visualized with plotting the orbit's effective potential. While this is technically not part of the same example, I'm just going to toss it in here using the example of the trajectory of [Voyager 1 en-route to Jupiter](https://voyager.jpl.nasa.gov/mission/science/hyperbolic-orbital-elements/):
 
@@ -206,10 +207,10 @@ solsys = earth_moon()
 solsys.add_satellite(adx.Body({"name": "Voyager1", "mass": 123}, negligible=True), voyager1)
 solsys.satellites["Voyager1"].plot_potential(y_window=[-4e8, 1e8])
 ```
-> ![effective_potential](../blob/main/imgs/effective_potential.png)
+> ![effective_potential](imgs/effective_potential.png)
 
----
 <a name="limitations"/>
+
 ## Limitations 
 
 Astrodynamics has several noteworthy limitations:
@@ -221,8 +222,8 @@ Astrodynamics has several noteworthy limitations:
 - Problems with inclination being tied to the values of other Euler angles (argument of periapsis, longitude of ascending node) means flipping the inclination of one orbit to invert the direction of the specific angular momentum vector (and thereby making a defined clockwise orbit instead move counter-clockwise) can sometimes produce unexpected results.
 - Trajectories do not yet take into consideration reference [epochs](https://en.wikipedia.org/wiki/Epoch_(astronomy)), though the included data for the planets of the Solar System is assumed to be with respect to [epoch J2000](https://en.wikipedia.org/wiki/Epoch_(astronomy)#Julian_years_and_J2000).
 
----
 <a name="future-goals"/>
+
 ## Future goals
 
 Most goals for the future are related to the above section. 
@@ -232,8 +233,8 @@ Most goals for the future are related to the above section.
 - Moreover, trying to keep calculations as analytical and insulated from fluctuation as possible, I hope to implement a *reliable* procedure for simulating both parabolic and hyperbolic trajectories as functions of time to circumvent ODE integration. This just may not be possible for parabolic trajectories, but I have experimented with a mean angular motion-based strategy for predicting the hyperbolic anomaly. However, the derived true anomaly seems to resemble that which would be expected, but eventually seems to "rubber-band" on true anomalies, increasing steadily before snapping back to an earlier point in a trajectory. This seems to be the biggest issue when using the [SciPy Newton solver](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.newton.html).
 - Astrodynamics currently has no solid method for setting both Keplerian orbital elements and a state vector simultaneously. Ideally, there would be a way to alter some orbital elements while keeping an original position vector constant, similar to an instantaneous change in velocity making an equatorial orbit change inclination, eccentricity, direction, etc. I spent loads of time trying to figure out a way to work this in, but kept running into issues with handling the linear algebra aspects needed to keep a state vector fixed while varying Euler angles. Furthermore, I don't know of a good way to ensure certain elements *can* carry-over to precise element changes, particularly verifying whether certain existing and desired elements lie along the same plane formed by the Euler angles.
 
----
 <a name="how-to-contribute"/>
+
 ## How to contribute 
 
 When I first started this project for my university physics course, I had no (immediate) intention to take it much further, certainly not to the degree where I would make it public and put it on GitHub. Admittedly, the only reason any of this is here on GitHub is because it wasn't originally good enough for *me*. I wanted to create something I could use to model the phenomenon while *proving to myself* I understood the mechanics.
@@ -246,6 +247,7 @@ Any and all contributions to this project are not only **welcomed** but ***invit
 
 ---
 <a name="license"/>
+
 ## License 
 MIT License
 
