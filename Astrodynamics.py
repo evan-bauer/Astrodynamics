@@ -1,4 +1,3 @@
-import warnings
 from copy import copy, deepcopy
 
 import numpy as np    
@@ -136,9 +135,23 @@ spatial_conversion = {"m": 1,
                       "Gm": 1e9,
                       "AU": AU}
 
+unit = lambda vector: vector / np.linalg.norm(vector)
+
 terrans, giants = [mercury, venus, earth, mars], [jupiter, saturn, uranus, neptune]
 kepler, cartes = ["a", "e", "inc", "arg_periapsis", "long_asc_node", "true_anomaly"], ["position", "velocity"]
 
+def check_sign(a: float, e: float) -> list:
+    """Function verifying that the sign of `a` is consistent with the magnitude of eccentricity."""
+    if (a < 0) and (e < 1): a *= -1
+    if (a > 0) and (e > 1): a *= -1
+    return a, e
+    
+def can_keep_position(position: np.ndarray, a: float, e: float) -> bool:
+    """Function for checking if a new trajectory can be established to pass through an existing position vector."""
+    if e >= 1: return False
+    r = np.linalg.norm(position)
+    return (a * (1 - e) <= r) and (a * (1 + e) >= r)
+    
 def sphere(radius):
     """Generate points along the surface of a sphere of specified radius."""
     u, v = np.linspace(0, 2 * np.pi, 15), np.linspace(0, np.pi, 15)
@@ -155,7 +168,7 @@ def degrees(rad: float | int) -> float:
     """Convert radians to degrees."""
     ang = (rad / (2 * np.pi)) * 360
     return ang % 360
-    
+
 def semi_circ(theta: float) -> float:
     """Function (primarily for inclination) to make an angle more readable."""
     theta = theta % 180
@@ -183,11 +196,11 @@ def grav_param(m1: float, m2: float) -> float:
     
 def radial_velocity(position: np.ndarray, velocity: np.ndarray) -> float: 
     """Calculate the radial component of the velocity vector."""
-    return np.dot(velocity, position / np.linalg.norm(position))
+    return np.dot(velocity, unit(position))
     
 def eccentricity_vector(position: np.ndarray, velocity: np.ndarray, std_grav_param: float) -> np.ndarray: 
     """Calculate eccentricity vector."""
-    return np.cross(velocity, np.cross(position, velocity)) / std_grav_param - position / np.linalg.norm(position)
+    return np.cross(velocity, np.cross(position, velocity)) / std_grav_param - unit(position)
     
 def semi_latus_rectum(a: float, e: float) -> float:
     """Determine semi-latus rectum of a semi-major axis and eccentricity pair."""
@@ -199,8 +212,7 @@ def semi_latus_rectum(a: float, e: float) -> float:
 def mean_angular_motion(std_grav_param: float, a=None) -> float:
     """Computes the mean angular motion of a satellite."""
     if a == None: return np.sqrt(std_grav_param)
-    if a < 0: a *= -1
-    return np.sqrt(std_grav_param / (a ** 3))
+    return np.sqrt(std_grav_param / np.abs(a ** 3))
 
 def hyperbolic_2_true_anom(hyp_anom: float, e: float) -> float: 
     """Convert hyperbolic anomaly to true anomaly."""
@@ -209,7 +221,7 @@ def hyperbolic_2_true_anom(hyp_anom: float, e: float) -> float:
     
 def true_2_hyperbolic_anom(true_anom: float, e: float) -> float: 
     """Convert true anomaly to hyperbolic anomaly."""
-    return degrees(2 * np.arctanh(sp.tandg(true_anom) / np.sqrt((e + 1) / (e - 1))))
+    return degrees(2 * np.arctanh(np.sqrt((e - 1) / (e + 1)) * sp.tandg(true_anom / 2)))
     
 def true_2_eccentric_anom(true_anom: float, e: float) -> float: 
     """Convert true anomaly to eccentric anomaly."""
@@ -231,7 +243,7 @@ def mean_2_true_anom(mean_anom: float, e: float) -> float:
     return mean_anom + degrees(2 * sum((sp.sindg(s * mean_anom) / s * (sp.jv(s, s * e) + inner(s))) for s in range(1, 250)))  
 
 def mean_2_hyperbolic_anom(mean_hyp_anom: float, e: float) -> float:
-    """Function for estimating the hyperbolic anomaly from mean hyperbolic anomaly"""
+    """Function for estimating the hyperbolic anomaly from mean hyperbolic anomaly."""
     mean_hyp_anom = radians(mean_hyp_anom)
     def f(F): return e * np.sinh(F) - F - mean_hyp_anom
     return degrees(newton(func=f, x0=mean_hyp_anom, fprime=lambda F: e * np.cosh(F) - 1, fprime2=lambda F: e * np.sinh(F), maxiter=200))
@@ -239,7 +251,8 @@ def mean_2_hyperbolic_anom(mean_hyp_anom: float, e: float) -> float:
 def true_anom_from_vectors(position: np.ndarray, velocity: np.ndarray, std_grav_param: float) -> float:
     """Function returning true anomaly calculated from state vectors and standard gravitational parameter."""
     ecc_vector = eccentricity_vector(position, velocity, std_grav_param)
-    nu = degrees(np.arccos(np.dot(ecc_vector, position) / (np.linalg.norm(ecc_vector) * np.linalg.norm(position))))
+    nu = degrees(np.arccos(np.dot(ecc_vector, position) / np.multiply(*np.linalg.norm((ecc_vector, position), axis=1))))
+    if np.linalg.norm(ecc_vector) >= 1: return nu
     return nu if np.dot(position, velocity) < 0 else (360 - nu)
 
 def mean_anomaly_shift(true_anom: float, e: float) -> float:
@@ -279,7 +292,7 @@ def plot_energy(obj, y_window=None, r_max=1e+8):
     plt.style.use('default')    
     fig, ax = plt.figure(figsize=(6, 6)), plt.axes()
 
-    # ESTIMATE APSES DISTANCES
+    # ESTIMATE APSE DISTANCES
     mag_h = np.linalg.norm(obj.specific_angular_momentum)
     if obj.e > 1: r_peri, r_apo = -obj.a * (obj.e - 1), np.inf
     if obj.e == 1: r_peri, r_apo = mag_h**2 / (2 * G * (obj.primary.mass + obj.mass)), np.inf
@@ -313,7 +326,7 @@ def plot_energy(obj, y_window=None, r_max=1e+8):
         ax.set_ylim(*y_window)
     elif type(y_window) == int:
         ax.set_ylim(-y_window, y_window)
-    ax.fill_between(rs, np.ones_like(rs) * obj.specific_energy, U_eff2, alpha=.25)
+    ax.fill_between(rs, np.full_like(rs, obj.specific_energy), U_eff2, alpha=.25)
     if np.isinf(r_apo):
         ax.set_xticks([0, r_peri, r_0, r.max()], [0, r"$r_{peri}$", r"$r_{circ}$", "max"])
     else:
@@ -458,14 +471,11 @@ def plot_satellite(fig, axes, graphic_type: str, sat_obj, relative_to=0, scale: 
         if relative_to.body.name == sat_obj.primary.body.name: sat_coords = sat_obj.prediction.local_coords[::markevery, :].T / scale_factor
             
     r0, rf = sat_obj.prediction.local_coords[0, :] / AU, sat_obj.prediction.local_coords[-1, :] / AU
-    x0, y0, z0 = sat_coords[:, 0]
-    xf, yf, zf = sat_coords[:, -1]
+    x0, y0, z0, xf, yf, zf = *sat_coords[:, 0], *sat_coords[:, -1]
     if isinstance(sat_obj.primary, Satellite):
-        soi_0 = r_soi(np.linalg.norm(r0), sat_obj.primary.body.mass, sat_obj.body.mass)
-        soi_f = r_soi(np.linalg.norm(rf), sat_obj.primary.body.mass, sat_obj.body.mass)
+        soi_0, soi_f = np.apply_along_axis(r_soi, 0, np.linalg.norm((r0, rf), axis=1), *[sat_obj.primary.body.mass, sat_obj.body.mass])
     elif isinstance(sat_obj.primary, System):
-        soi_0 = r_soi(np.linalg.norm(r0), sat_obj.primary.body_mass, sat_obj.body.mass)
-        soi_f = r_soi(np.linalg.norm(rf), sat_obj.primary.body_mass, sat_obj.body.mass)
+        soi_0, soi_f = np.apply_along_axis(r_soi, 0, np.linalg.norm((r0, rf), axis=1), *[sat_obj.primary.body_mass, sat_obj.body.mass])
     if graphic_type == "planar":
         ((ax1, ax2), (ax3, ax4)) = axes
         cb = ax1.scatter(*sat_coords[[0, 1], :], c=time, cmap="viridis", s=2)
@@ -526,7 +536,6 @@ def window_polish(fig, axes, graphic_type, x_window=None, y_window=None, z_windo
             ax.grid(alpha=.5)
             ax.set_axisbelow(True)
             ax.set_aspect('equal', anchor=["SE", "SW", "NE", "NW"][i])
-
     elif graphic_type == "3d":
         None if x_window is None else axes.axes.set_xlim3d(left=x_window[0], right=x_window[1])
         None if y_window is None else axes.axes.set_ylim3d(bottom=y_window[0], top=y_window[1])
@@ -584,27 +593,24 @@ def keplerian_2_cartesian(std_grav_param: float, kwargs: dict[str, float], incli
     TypeError
         If the argument containing Keplerian orbital elements is not a dictionary.
     NotImplementedError
-        If an orbital element implies the trajectory is parabolic.
+        If an orbital element implies the trajectory is parabolic and therefore ambiguous.
     
     Adapted from https://orbital-mechanics.space/classical-orbital-elements/orbital-elements-and-the-state-vector.html#orbital-elements-state-vector
     """
 
     if not isinstance(kwargs, dict): raise TypeError("Keplerian elements must be defined in a dictionary.")
-    if (kwargs["a"] == 0) or (kwargs["e"] == 1): raise NotImplementedError("Process for defining parabolic trajectories not yet available, try providing state vectors instead.")
-    if (kwargs["a"] < 0) and (kwargs["e"] < 1): kwargs["a"] *= -1
-    if (kwargs["a"] > 0) and (kwargs["e"] > 1): kwargs["a"] *= -1
-        
-    p = semi_latus_rectum(kwargs["a"], kwargs["e"])
-    h = np.sqrt(std_grav_param * p)
-    r = p / (1 + kwargs["e"] * sp.cosdg(kwargs["true_anomaly"]))
-    r_w = r * np.array([sp.cosdg(kwargs["true_anomaly"]), sp.sindg(kwargs["true_anomaly"]), 0])
-    v_w = std_grav_param / h * np.array([-sp.sindg(kwargs["true_anomaly"]), kwargs["e"] + sp.cosdg(kwargs["true_anomaly"]), 0])
+    a, e = check_sign(kwargs["a"], kwargs["e"])
+    if (a == 0) or (e == 1): raise NotImplementedError("Process for defining parabolic trajectories from Keplerian elements not yet available, try providing state vectors instead.")
     try:
         angles = (kwargs["arg_periapsis"], kwargs["inc"][inclination], kwargs["long_asc_node"])
     except:
         angles = (kwargs[angle] for angle in ["arg_periapsis", "inc", "long_asc_node"])
-    R = Rotation.from_euler("ZXZ", [-angle for angle in angles], degrees=True)
-    return R.apply([r_w, v_w], inverse=True) 
+    finally: 
+        h = np.sqrt(std_grav_param * np.abs(a) * (e**2 - 1 if e > 1 else 1 - e**2))
+        r = semi_latus_rectum(a, e) / (1 + e * sp.cosdg(kwargs["true_anomaly"]))
+        r_w = r * np.array([sp.cosdg(kwargs["true_anomaly"]), sp.sindg(kwargs["true_anomaly"]), 0])
+        v_w = std_grav_param / h * np.array([-sp.sindg(kwargs["true_anomaly"]), e + sp.cosdg(kwargs["true_anomaly"]), 0])
+        return Rotation.from_euler("ZXZ", [-angle for angle in angles], degrees=True).apply([r_w, v_w], inverse=True) 
 
 def cartesian_2_keplerian(std_grav_param: float, vectors: dict[str, float]) -> list:
     """
@@ -614,7 +620,7 @@ def cartesian_2_keplerian(std_grav_param: float, vectors: dict[str, float]) -> l
     ----------
     std_grav_param : float 
         The standard gravitational parameter of the system (m^3 s^-2).
-    vectors : dict
+    vectors : dict[str, np.ndarray]
         Dictionary of trajectory parameters including combinations of the following:
         position : np.ndarray
             Cartesian position state vector (m).
@@ -652,15 +658,13 @@ def cartesian_2_keplerian(std_grav_param: float, vectors: dict[str, float]) -> l
     if (vectors["position"].shape != (3, )) or (vectors["velocity"].shape != (3, )): raise ValueError(f"State vector shapes must be (3, )")
     position, velocity = vectors["position"], vectors["velocity"]
     h_vector = np.cross(position, velocity)
-    specific_angular_momentum, r, v = np.linalg.norm(h_vector), np.linalg.norm(position), np.linalg.norm(velocity)
+    specific_angular_momentum, r, v = np.linalg.norm((h_vector, position, velocity), axis=1)
     specific_energy = 0.5 * v**2 - std_grav_param / r
     e_vector = eccentricity_vector(position, velocity, std_grav_param)
-    a, e = -std_grav_param / (2 * specific_energy), np.linalg.norm(e_vector)
+    a, e = check_sign(-0.5 * std_grav_param / specific_energy, np.linalg.norm(e_vector))
     inc = np.arccos(h_vector[2] / specific_angular_momentum)
     N = np.cross(np.array([0, 0, 1]), h_vector)
 
-    if (a < 0) and (e < 1): a *= -1
-    if (a > 0) and (e > 1): a *= -1
     if N[1] >= 0: long_asc = np.arccos(N[0] / np.linalg.norm(N))
     if N[1] < 0: long_asc = 2 * np.pi - np.arccos(N[0] / np.linalg.norm(N))
     if e_vector[2] >= 0: arg_periapsis = np.arccos(np.dot(e_vector, N) / (e * np.linalg.norm(N)))
@@ -729,14 +733,10 @@ class Body:
         return f"Body - {rounded.name}: Mass-{rounded.mass}kg, Radius-{rounded.radius / 1e3}km"
 
     def __ne__(self, other): 
-        if self.negligible or other.negligible:
-            if self.negligible and other.negligible: return False
-            return True
+        if self.negligible or other.negligible: return False if self.negligible and other.negligible else True
         return (self.mass != other.mass)
     def __eq__(self, other): 
-        if self.negligible or other.negligible:
-            if self.negligible and other.negligible: return True
-            return False
+        if self.negligible or other.negligible: return True if self.negligible and other.negligible else False
         return (self.mass == other.mass)
     def __gt__(self, other): 
         if self.negligible or other.negligible:
@@ -878,7 +878,7 @@ class System:
             satA_coords = satA.prediction.global_coords
             for satX in _satellites:
                 satX_coords = satX.prediction.global_coords
-                distance = np.apply_along_axis(np.linalg.norm, 1, np.subtract(satA_coords, satX_coords))
+                distance = np.linalg.norm(np.subtract(satA_coords, satX_coords), axis=1)
                 if not satA.negligible: distance = np.subtract(distance, satA.SOI)
                 if not satX.negligible: distance = np.subtract(distance, satX.SOI)
                 if np.any(np.nonzero(distance < 0.0)):
@@ -1047,7 +1047,7 @@ class Trajectory(Body):
         Method to calculate and display the effective potential of an orbiting body.
     """
     
-    def __init__(self, kwargs: dict[str, float], inclination: str = "ecliptic"):
+    def __init__(self, kwargs: dict[str, float], to_set: dict = {}, inclination: str = "ecliptic"):
         """
         Parameters
         ----------
@@ -1069,6 +1069,10 @@ class Trajectory(Body):
                 Cartesian position state vector (m) (default [1e6, 0, 0]).
             velocity : array
                 Cartesian velocity state vector (m s^-1) (default [0, 1e3, 0]).
+        to_set : dict
+            Dictionary for seperately storing elements to be changed apart from elements from an original trajectory, not intended to be used directly.
+        inclination : str
+            Type of inclination reference plane to be used (default: ecliptic), though if the dictionary supplied does not specify the reference plane, it is assumed that the angle provided is measured with respect to the default plane.
                 
         Raises
         ------
@@ -1080,8 +1084,7 @@ class Trajectory(Body):
 
         if not isinstance(kwargs, dict): raise TypeError("Trajectory object can only be created using a dictionary of parameters")
         self.__inclination = inclination
-        default = {"orbit": "Circular",
-                   "a": 1.0,
+        default = {"a": 1.0,
                    "e": 0.0,
                    "inc": 0.0,
                    "arg_periapsis": 0.0,
@@ -1089,31 +1092,56 @@ class Trajectory(Body):
                    "true_anomaly": 0.0,
                    "position": np.array([1e6, 0, 0]),
                    "velocity": np.array([0, 1e3, 0])}
+        if len(to_set) == 0:
+            if any(element in kepler for element in kwargs) and any(element in cartes for element in kwargs):
+                raise NotImplementedError("Process to set a trajectory using both Keplerian and Cartesian parameters does not exist yet.")
+            elif any(element in kepler for element in kwargs):
+                self._from_kepler_({element: default[element] if not element in kwargs else kwargs[element] for element in kepler})
+            elif any(element in cartes for element in kwargs):
+                self._from_state_vectors_({element: default[element] if not element in kwargs else kwargs[element] for element in cartes})
+        elif len(to_set) == 1:
+            if "a" in to_set.keys():
+                a, e = check_sign(to_set["a"], kwargs["e"])
+                if can_keep_position(kwargs["position"], a, e):
+                    self.__align_and_rotate(kwargs["position"], a, e)
+                else:
+                    self.__placeholder(kwargs, to_set)
+            elif "e" in to_set.keys():
+                a, e = check_sign(kwargs["a"], to_set["e"])
+                if can_keep_position(kwargs["position"], a, e):
+                    self.__align_and_rotate(kwargs["position"], a, e)
+                else:
+                    self.__placeholder(kwargs, to_set)
+            else:
+                self.__placeholder(kwargs, to_set)
+        elif len(to_set) == 2:
+            if ("a" in to_set.keys()) and ("e" in to_set.keys()):
+                a, e = check_sign(to_set["a"], to_set["e"])
+                if can_keep_position(kwargs["position"], a, e):
+                    self.__align_and_rotate(kwargs["position"], a, e)
+                else:
+                    self.__placeholder(kwargs, to_set)
+            else:
+                self.__placeholder(kwargs, to_set)
+        else:
+            self.__placeholder(kwargs, to_set)
 
-        if any(element in kepler for element in kwargs) and any(element in cartes for element in kwargs):
-            raise NotImplementedError("Process to set a trajectory using both Keplerian and Cartesian parameters does not exist yet.")
-        elif any(element in kepler for element in kwargs):
-            self._from_kepler_({element:default[element] if not element in kwargs else kwargs[element] for element in kepler})
-        elif any(element in cartes for element in kwargs):
-            self._from_state_vectors_({element:default[element] if not element in kwargs else kwargs[element] for element in cartes})
-        
-    def __repr__(self): return f"{self.orbit} Trajectory - a:{self.a}, e:{self.e}, inc={self.inc}"
-    def __str__(self): return f"{self.orbit} Trajectory - a:{self.a}, e:{self.e}, inc={self.inc}"
+    def __repr__(self): return f"{self.orbit} Trajectory - a:{self.a}m, e:{self.e}, inc:{self.inc}deg"
+    def __str__(self): return f"{self.orbit} Trajectory - a:{self.a}m, e:{self.e}, inc:{self.inc}deg"
     
     def keys(self): return ["orbit", *kepler, *cartes]
     def __getitem__(self, key): return getattr(self, key)
     def __setitem__(self, key, val): sef[key] = value
         
-    def _from_kepler_(self, kwargs: dict):
+    def _from_kepler_(self, kwargs: dict[str, float]):
         if kwargs["e"] < 0: raise ValueError("Eccentricity cannot be less than zero.")
-        if (kwargs["a"] < 0) and (kwargs["e"] < 1): kwargs["a"] *= -1
-        if (kwargs["a"] > 0) and (kwargs["e"] > 1): kwargs["a"] *= -1
+        a, e = check_sign(kwargs["a"], kwargs["e"])
         position, velocity = keplerian_2_cartesian(self.gparam, kwargs, inclination=self.__inclination)
         if isinstance(kwargs["inc"], dict):
             inc = kwargs["inc"][self.__inclination]
         else:
             inc = kwargs["inc"]
-        self.orbit, self.a, self.e, self.inc, self.arg_periapsis, self.long_asc_node, self.true_anomaly, self.position, self.velocity = self._orbit(eccentricity=kwargs["e"]), kwargs["a"], kwargs["e"], semi_circ(inc), kwargs["arg_periapsis"], kwargs["long_asc_node"], kwargs["true_anomaly"], position, velocity
+        self.orbit, self.a, self.e, self.inc, self.arg_periapsis, self.long_asc_node, self.true_anomaly, self.position, self.velocity = self._orbit(eccentricity=e), a, e, semi_circ(inc), kwargs["arg_periapsis"], kwargs["long_asc_node"], kwargs["true_anomaly"], position, velocity
 
     def _from_state_vectors_(self, kwargs: dict[str, np.ndarray]):
         a, e, inc, arg_periapsis, long_asc_node, true_anomaly = cartesian_2_keplerian(self.gparam, kwargs)
@@ -1126,9 +1154,29 @@ class Trajectory(Body):
         if eccentricity < 1: return "Elliptical"
         if eccentricity == 1: return "Parabolic"
         if eccentricity > 1: return "Hyperbolic"
-    
+
+    def __placeholder(self, original, to_set):
+        """Functional placeholder method for updating trajectory parameters without extra consideration for maintaining original elements."""
+        original.update(to_set)
+        if any(element in kepler for element in to_set) and any(element in cartes for element in to_set):
+            raise NotImplementedError("Process to set a trajectory using both Keplerian and Cartesian parameters does not exist yet.")
+        elif any(element in kepler for element in to_set):
+            self._from_kepler_({element: original[element] for element in kepler})
+        elif any(element in cartes for element in to_set):
+            self._from_state_vectors_({element: original[element] for element in cartes})
+
+    def __align_and_rotate(self, position, a, e):
+        r = np.linalg.norm(position)
+        self.true_anomaly = degrees(np.arccos((a * (1 - e**2) - r) / (e * r)))
+        r_w = r * np.array([sp.cosdg(self.true_anomaly), sp.sindg(self.true_anomaly), 0])
+        v_w = self.gparam / np.linalg.norm(self.specific_angular_momentum) * np.array([-sp.sindg(self.true_anomaly), e + sp.cosdg(self.true_anomaly), 0])
+        align = self.rotation.align_vectors(np.array([r_w]), np.array([position]))[0]
+        self.velocity = align.apply([v_w], inverse=True)
+        
     @property
     def radial(self) -> float: return np.linalg.norm(self.position)
+    @property
+    def radial_velocity(self) -> float: return radial_velocity(self.position, self.velocity)
     @property
     def speed(self) -> float: return np.linalg.norm(self.velocity)
     @property
@@ -1139,6 +1187,10 @@ class Trajectory(Body):
     def state(self) -> dict[str, np.ndarray]:
         """Return dictionary of the state vectors."""
         return {"position": self.position, "velocity": self.velocity}
+    @property
+    def elements(self) -> dict:
+        """Return dictionary of all orbital elements."""
+        return {element: getattr(self, element) for element in [*kepler, *cartes]}
     @property
     def gparam(self) -> float: 
         """Returns the standard gravitational parameter (m^3 s^-2) of the satellite and its primary"""
@@ -1179,13 +1231,17 @@ class Trajectory(Body):
         true_anomaly = radians(self.true_anomaly)
         return degrees(np.arctan((self.e * sp.sindg(true_anomaly)) / (1 + self.e * sp.cosdg(true_anomaly))))
     @property
+    def rotation(self):
+        """Return the SciPy Rotation object corresponding to the defined Euler angles."""
+        return Rotation.from_euler("ZXZ", [-getattr(self, angle) for angle in ["arg_periapsis", "inc", "long_asc_node"]], degrees=True)
+    @property
     def specific_energy(self) -> float:
         """Computes the specific orbital energy of the trajectory."""
-        epsilon = (G * self.primary.mass * self.body.mass) / (2 * self.a)
         if self.e < 0: raise ValueError("Eccentricity less than zero")
+        if self.e == 1: return 0
+        epsilon = self.gparam / (2 * self.a)
         if self.e < 1: return -epsilon
         if self.e > 1: return epsilon
-        if self.e == 1: return 0
     @property
     def specific_angular_momentum(self) -> np.ndarray:
         """Returns the specific angular momentum vector."""
@@ -1364,7 +1420,7 @@ class Satellite(Trajectory):
             satA_coords = satA.prediction.global_coords
             for satX in _satellites:
                 satX_coords = satX.prediction.global_coords
-                distance = np.apply_along_axis(np.linalg.norm, 1, np.subtract(satA_coords, satX_coords))
+                distance = np.linalg.norm(np.subtract(satA_coords, satX_coords), axis=1)
                 if not satA.negligible: distance = np.subtract(distance, satA.SOI)
                 if not satX.negligible: distance = np.subtract(distance, satX.SOI)
                 if np.any(np.nonzero(distance < 0.0)):
@@ -1410,58 +1466,53 @@ class Satellite(Trajectory):
                 super().__init__({"position": kwargs["position"], "velocity": kwargs["velocity"]}, inclination=self.__inclination)
             elif all(element in kwargs for element in kepler):
                 # if the element dict has all Keplerian elements, use ONLY those elements
-                super().__init__({element:getattr(self, element) if not element in kwargs else kwargs[element] for element in kepler}, inclination=self.__inclination)
+                super().__init__(kwargs, inclination=self.__inclination)
             else:
-                raise NotImplementedError("Process to set a trajectory using both Keplerian and Cartesian parameters unnavailable")
+                raise NotImplementedError("Process to set a trajectory using both Keplerian and Cartesian parameters currently unnavailable.")
         elif any(element in kepler for element in kwargs):
-            super().__init__({element:getattr(self, element) if not element in kwargs else kwargs[element] for element in kepler}, inclination=self.__inclination)
+            super().__init__(self.elements, to_set=kwargs, inclination=self.__inclination)
         elif any(element in cartes for element in kwargs):
-            super().__init__({element:getattr(self, element) if not element in kwargs else kwargs[element] for element in cartes}, inclination=self.__inclination)
+            super().__init__(self.elements, to_set=kwargs, inclination=self.__inclination)
 
     def set_semimajor_axis(self, a: float):
         """Method directly setting semi-major axis."""
         elements = self.kepler; elements["a"] = a
         if (self.e > 1) and (a > 0): a *= -1
-        if (self.e < 1) and (a < 0): raise ValueError("Semi-major axis < 0 implies hyperbolic trajectory but eccentricity does not match")
-        super().__init__(elements, inclination=self.__inclination)
+        if (self.e < 1) and (a < 0): raise ValueError("Semi-major axis < 0 implies hyperbolic trajectory but eccentricity does not match.")
+        super().__init__(self.elements, to_set={"a": a}, inclination=self.__inclination)
         
     def set_eccentricity(self, e: float):
         """Method directly setting eccentricity."""
-        elements = self.kepler; elements["e"] = e
-        if e < 0: raise ValueError("Eccentricity less than zero")
+        if e < 0: raise ValueError("Eccentricity less than zero.")
         if (self.a < 0) and (e < 1): self.a *= -1
         if (self.a > 0) and (e > 1): self.a *= -1
-        super().__init__(elements, inclination=self.__inclination)
+        super().__init__(self.elements, to_set={"e": e}, inclination=self.__inclination)
         
     def set_inclination(self, inc: float): 
         """Method directly setting inclination."""
-        elements = self.kepler; elements["inc"] = inc
-        super().__init__(elements, inclination=self.__inclination)
+        super().__init__(self.elements, to_set={"inc": inc}, inclination=self.__inclination)
         
     def set_arg_periapsis(self, arg_periapsis: float): 
         """Method directly setting argument of periapsis."""
-        elements = self.kepler; elements["arg_periapsis"] = arg_periapsis
-        super().__init__(elements, inclination=self.__inclination)
+        super().__init__(self.elements, to_set={"arg_periapsis": arg_periapsis}, inclination=self.__inclination)
 
     def set_long_asc_node(self, long_asc_node: float): 
         """Method directly setting longitude of ascending node."""
-        elements = self.kepler; elements["long_asc_node"] = long_asc_node
-        super().__init__(elements, inclination=self.__inclination)
+        super().__init__(self.elements, to_set={"long_asc_node": long_asc_node}, inclination=self.__inclination)
         
     def set_true_anomaly(self, anomaly: float):
         """Method directly setting true anomaly."""
-        elements = self.kepler; elements["true_anomaly"] = anomaly
         if self.orbit == "Hyperbolic":
             true_anom_inf = degrees(np.arccos(-1 / self.e))
             if np.abs(anomaly) > true_anom_inf: raise ValueError(f"Anomaly for this trajectory cannot not exceed {true_anom_inf} degrees")
         if self.orbit == "Parabolic":
             if np.abs(anomaly) > 180: raise ValueError("Anomaly must not exceed 180 degrees.")
-        super().__init__(elements, inclination=self.__inclination)
+        super().__init__(self.elements, to_set={"true_anomaly": anomaly}, inclination=self.__inclination)
         
     def set_eccentric_anomaly(self, anomaly: float): 
         """Method directly setting eccentric anomaly."""
         elements = self.kepler; elements["true_anomaly"] = eccentric_2_true_anom(anomaly, self.e)
-        super().__init__(elements, inclination=self.__inclination)
+        super().__init__(self.elements, to_set={"true_anomaly": eccentric_2_true_anom(anomaly, self.e)}, inclination=self.__inclination)
         
     def set_position(self, position: np.ndarray): 
         """Method directly setting position vector."""
@@ -1676,7 +1727,6 @@ class Predict:
         self.__satellite = satellite
         self.__primary = satellite.primary
         self.object = satellite.name
-
         if solver == "best":
             if satellite.orbit == "Circular":
                 self.solver = "Anomaly: Algebraic"
@@ -1687,15 +1737,25 @@ class Predict:
             elif satellite.orbit == "Parabolic":
                 self.__integrate(time_array)
             elif satellite.orbit == "Hyperbolic":
-                self.__integrate(time_array)
-                # Newton solver needs to be fixed before it can be reliably used
-                # Causes bugs when escapes/encounters are expected
-                # warnings.warn("Using Newton root finding produces results similar to what is expected, but tends to be inaccurate at large hyperbolic anomalies. It is recommended to use 'integrate' method for hyperbolic trajectories instead.")
-                # self.solver = "Anomaly: Newton Solver"
-                # hyp_anom_0 = radians(true_2_hyperbolic_anom(satellite.true_anomaly, satellite.e))
-                # offset = degrees(satellite.e * np.sinh(hyp_anom_0) - hyp_anom_0)
-                # mean_hyp_anoms = offset + degrees(satellite.mean_angular_motion * time_array)
-                # self.__iternomaly(time_array, hyperbolic_2_true_anom(mean_2_hyperbolic_anom(mean_hyp_anoms, satellite.e), satellite.e))
+                self.solver = "Anomaly: Newton Solver"
+                # Adapted from https://orbital-mechanics.space/time-since-periapsis-and-keplers-equation/hyperbolic-trajectory-example.html
+                h = np.linalg.norm(self.__satellite.specific_angular_momentum)
+                t_0 = h**3 / self.__satellite.gparam**2 * 1 / (self.__satellite.e**2 - 1)**(3 / 2)
+                Mh_arr = self.__satellite.mean_angular_motion * (time_array - t_0)
+                hyp_anoms = np.full_like(time_array, np.nan)
+                for idx, M_h in enumerate(Mh_arr):
+                    hyp_anoms[idx] = degrees(newton(
+                        func=lambda F, M_h, e: e * np.sinh(F) - F - M_h,
+                        fprime=lambda F, M_h, e: e * np.cosh(F) - 1,
+                        fprime2=lambda F, M_h, e: e * np.sinh(F),
+                        x0=0, args=(M_h, self.__satellite.e)))
+                # Need to store the indeces where the anomaly is negative to accurately convert the hyperbolic to true anomaly
+                # This also serves to establish an intuitive interpretation of where the satellite is along its trajectory with respect to pericenter
+                isneg = np.where(hyp_anoms > degrees(np.arccos(-1 / self.__satellite.e)))
+                hyp_anoms[isneg] -= 360
+                true_anoms = np.apply_along_axis(hyperbolic_2_true_anom, 0, np.abs(hyp_anoms), self.__satellite.e)
+                true_anoms[isneg] *= -1
+                self.__iternomaly(time_array, true_anoms)
         elif solver == "integrate":
             self.__integrate(time_array)
         else:
@@ -1707,7 +1767,7 @@ class Predict:
                 # Truncation is not necessary as the system SOI is assumed to approach infinity
                 pass
             else:
-                if np.any(np.nonzero(self.radial > np.full((len(self),), self.__primary.SOI))):
+                if np.any(np.nonzero(self.radial > np.full_like(self.time_array, self.__primary.SOI))):
                     wrt_soi = np.greater(self.radial[:-1], np.full((len(self) - 1,), self.__primary.SOI))
                     diff_radial = np.greater(np.diff(self.radial), np.zeros(len(self) - 1))
                     idx = np.nonzero(np.logical_and(wrt_soi, diff_radial))[0][0]
@@ -1715,13 +1775,13 @@ class Predict:
                     self.truncate(idx)
         if check_collision:
             if isinstance(self.__primary, System):
-                if np.any(np.nonzero(self.radial < np.full((len(self),), self.__primary.primary.radius))):
-                    idx = np.where(self.radial < np.full((len(self),), self.__primary.primary.radius))[0][0]
+                if np.any(np.nonzero(self.radial < np.full_like(self.time_array, self.__primary.primary.radius))):
+                    idx = np.where(self.radial < np.full_like(self.time_array, self.__primary.primary.radius))[0][0]
                     self.truncate(idx)
                     print(f"Satellite {self.object} impacts primary {self.__primary.body.name} at time {time_array[idx] / timestep_conversion['days']} days")
             else:
-                if np.any(np.nonzero(self.radial < np.full((len(self),), self.__primary.radius))):
-                    idx = np.where(self.radial < np.full((len(self),), self.__primary.radius))[0][0]
+                if np.any(np.nonzero(self.radial < np.full_like(self.time_array, self.__primary.radius))):
+                    idx = np.where(self.radial < np.full_like(self.time_array, self.__primary.radius))[0][0]
                     self.truncate(idx)
                     print(f"Satellite {self.object} impacts primary {self.__primary.body.name} at time {time_array[idx] / timestep_conversion['days']} days")
 
@@ -1734,9 +1794,9 @@ class Predict:
     def __setitem__(self, key, val): self[key] = value
         
     @property
-    def radial(self) -> np.ndarray: return np.apply_along_axis(np.linalg.norm, 1, self.local_coords)
+    def radial(self) -> np.ndarray: return np.linalg.norm(self.local_coords, axis=1)
     @property
-    def speed(self) -> np.ndarray: return np.apply_along_axis(np.linalg.norm, 1, self.local_velocity)
+    def speed(self) -> np.ndarray: return np.linalg.norm(self.local_velocity, axis=1)
     @property
     def global_coords(self) -> np.ndarray:
         """Compute the coordinates of the satellite relative to the system."""
@@ -1767,6 +1827,8 @@ class Predict:
         solution = odeint(model_2BP, state, self.time_array, args=(self.__satellite.gparam * 1e-9, )) * 1e3
         local_coords, local_velocity = solution[:, :3], solution[:, 3:]
         self.true_anomaly = np.array([true_anom_from_vectors(pos, vel, self.__satellite.gparam) for pos, vel in zip(local_coords, local_velocity)])
+        radial_velocity = np.array([np.dot(pos, vel) for pos, vel in zip(unit(local_coords), local_velocity)])
+        self.true_anomaly[np.where(radial_velocity < 0)] *= -1 
         self.local_coords, self.local_velocity = local_coords, local_velocity
 
     def truncate(self, idx: int):
