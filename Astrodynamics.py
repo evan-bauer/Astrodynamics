@@ -252,8 +252,8 @@ def true_anom_from_vectors(position: np.ndarray, velocity: np.ndarray, std_grav_
     """Function returning true anomaly calculated from state vectors and standard gravitational parameter."""
     ecc_vector = eccentricity_vector(position, velocity, std_grav_param)
     nu = degrees(np.arccos(np.dot(ecc_vector, position) / np.multiply(*np.linalg.norm((ecc_vector, position), axis=1))))
-    if np.linalg.norm(ecc_vector) >= 1: return nu
-    return nu if np.dot(position, velocity) < 0 else (360 - nu)
+    if np.linalg.norm(ecc_vector) >= 1: return -nu if np.dot(position, velocity) < 0 else nu
+    return 360 - nu if np.dot(position, velocity) < 0 else nu
 
 def mean_anomaly_shift(true_anom: float, e: float) -> float:
     """Function computing the phase shift of the mean anomaly due to a nonzero true anomaly at the start of the simulation."""
@@ -299,7 +299,7 @@ def plot_energy(obj, y_window=None, r_max=1e+8):
     if obj.e == 0: r_peri, r_apo = obj.a, obj.a
     if obj.e < 1: r_peri, r_apo = obj.a * (1 - obj.e), obj.a * (1 + obj.e)
     if np.isinf(r_apo):
-        if r_max == None: r_max = 1e+8
+        if r_max == None: r_max = 10 ** (np.log10(np.ceil(np.abs(r_peri))) + 1)
         r, rs = np.linspace(10, r_max * 1.1), np.linspace(r_peri, r_max * 1.1)
     else:
         r, rs = np.linspace(10, r_apo * 1.1), np.linspace(r_peri, r_apo)
@@ -318,14 +318,17 @@ def plot_energy(obj, y_window=None, r_max=1e+8):
     ax.axvline(r_peri, dashes=(1, 1), c='orange', label=r"$r_{peri}$")
     ax.axvline(r_apo, dashes=(1, 1), c='cyan', label=r"$r_{apo}$") if not r_apo == np.inf else None
     ax.axvline(r_0, dashes=(1, 1), c='magenta', label=r"$r_{circ}$")
-    ax.set_title(f"Effective Potential of {obj.body.name} About {obj.primary.body_name}")
+    ax.set_title(f"Effective Potential of {obj.body.name} About {obj.primary.body_name if isinstance(obj.primary, System) else obj.primary.body.name}")
     ax.set_xlabel(r"Radial Distance (m)")
     ax.set_ylabel(r"Effective Potential")
     ax.set_xlim(0, r.max())
     if type(y_window) == list:
         ax.set_ylim(*y_window)
-    elif type(y_window) == int:
+    elif isinstance(y_window, int) or isinstance(y_window, float):
         ax.set_ylim(-y_window, y_window)
+    else:
+        lim = np.log10(np.ceil(np.abs(obj.specific_energy))) + 1
+        ax.set_ylim(-10**lim, 10**lim)
     ax.fill_between(rs, np.full_like(rs, obj.specific_energy), U_eff2, alpha=.25)
     if np.isinf(r_apo):
         ax.set_xticks([0, r_peri, r_0, r.max()], [0, r"$r_{peri}$", r"$r_{circ}$", "max"])
@@ -669,16 +672,14 @@ def cartesian_2_keplerian(std_grav_param: float, vectors: dict[str, float]) -> l
     if N[1] < 0: long_asc = 2 * np.pi - np.arccos(N[0] / np.linalg.norm(N))
     if e_vector[2] >= 0: arg_periapsis = np.arccos(np.dot(e_vector, N) / (e * np.linalg.norm(N)))
     if e_vector[2] < 0: arg_periapsis = 2 * np.pi - np.arccos(np.dot(e_vector, N) / (e * np.linalg.norm(N)))
-    if radial_velocity(position, velocity) >= 0: true_anom = np.arccos(np.dot(e_vector, position) / (e * r))
-    if radial_velocity(position, velocity) < 0: true_anom = 2 * np.pi - np.arccos(np.dot(e_vector, position) / (e * r))
-    return a, e, semi_circ(degrees(inc)), degrees(arg_periapsis), degrees(long_asc), degrees(true_anom)
+    return a, e, semi_circ(degrees(inc)), degrees(arg_periapsis), degrees(long_asc), true_anom_from_vectors(position, velocity, std_grav_param)
 
 class Body:
     """
     A class used to represent a celestial body.
-
+    
     ...
-
+    
     Attributes
     ----------
     body_name : str
@@ -765,7 +766,7 @@ class Body:
         
 class System:
     """
-    A class used to represent a celestial body.
+    A class used to represent a system of .
 
     ...
 
@@ -834,6 +835,12 @@ class System:
                 return next(self.satellites.items())
             except StopIteration:
                 break
+
+    def __getitem__(self, key):
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            return self.satellites[key]
     
     def __len__(self): return len(self.satellites)
     def __repr__(self): return self.name
@@ -871,7 +878,7 @@ class System:
     def __check_encounters(self):
         """Class method to systematically compare each pair of satellite's coordinates for an encounter."""
         _satellites = [sat_obj for satname, sat_obj in self]
-        encounter_indeces = []
+        encounter_indices = []
         while len(_satellites) > 1:
             # Popping the list of satellites avoids duplicate comparison between satellite pairs
             satA = _satellites.pop()
@@ -884,8 +891,8 @@ class System:
                 if np.any(np.nonzero(distance < 0.0)):
                     idx = np.where(distance < 0.0)[0][0]
                     print(f"Encounter found between {satA.body.name} and {satX.body.name} at time {satA.prediction.time_array[idx] / timestep_conversion['days']} days")
-                    encounter_indeces.append(idx)
-        if len(encounter_indeces) > 0: self.__truncate(np.array(encounter_indeces))
+                    encounter_indices.append(idx)
+        if len(encounter_indices) > 0: self.__truncate(np.array(encounter_indices))
             
     def add_satellite(self, secondary: Body, kwargs: dict[str, float]):
         """
@@ -927,7 +934,7 @@ class System:
         else:
             raise ValueError("Satellite more massive than System primary.")
 
-    def simulate(self, duration: float | int, timestep: str = "days", resolution: int = 10000, solver: str = "best", check_escape: bool = True, check_collision: bool = False, check_encounter=True):
+    def simulate(self, duration: float | int, timestep: str = "days", resolution: int = 10000, solver: str = "best", check_escape: bool = True, check_collision: bool = False, check_encounter: bool = True):
         """
         Predicts the motion of the satellite about the primary celestial body, and returns results of the simulation as an attribute of the simulated satellite.
         
@@ -1239,9 +1246,8 @@ class Trajectory(Body):
         """Computes the specific orbital energy of the trajectory."""
         if self.e < 0: raise ValueError("Eccentricity less than zero")
         if self.e == 1: return 0
-        epsilon = self.gparam / (2 * self.a)
-        if self.e < 1: return -epsilon
-        if self.e > 1: return epsilon
+        epsilon = -self.gparam / (2 * self.a)
+        return epsilon
     @property
     def specific_angular_momentum(self) -> np.ndarray:
         """Returns the specific angular momentum vector."""
@@ -1353,9 +1359,9 @@ class Satellite(Trajectory):
                 The longitude of the ascending node (degrees).
             true_anomaly : float 
                 The true anomaly (degrees).
-            position : array
+            position : np.ndarray
                 Cartesian position state vector (m).
-            velocity : array
+            velocity : np.ndarray
                 Cartesian velocity state vector (m s^-1).
         inclination : str
             The reference plane for inclination measurements (default: 'ecliptic').
@@ -1388,8 +1394,12 @@ class Satellite(Trajectory):
     def __str__(self): return f"Satellite of {self.primary.name} - {self.body.name}"
         
     def keys(self): return ["body", "orbit", "primary", *kepler, *cartes]
-    def __getitem__(self, key): return getattr(self, key)
     def __setitem__(self, key, val): self[key] = value
+    def __getitem__(self, key):
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            return self.satellites[key]    
 
     def __iter__(self): return iter(self.satellites.items())
     def __next__(self):
@@ -1413,7 +1423,7 @@ class Satellite(Trajectory):
     def __check_encounters(self):
         """Class method to systematically compare each pair of satellite's coordinates for an encounter."""
         _satellites = [sat_obj for satname, sat_obj in self]
-        encounter_indeces = []
+        encounter_indices = []
         while len(_satellites) > 1:
             # Popping the list of satellites avoids duplicate comparison between satellite pairs
             satA = _satellites.pop()
@@ -1426,8 +1436,8 @@ class Satellite(Trajectory):
                 if np.any(np.nonzero(distance < 0.0)):
                     idx = np.where(distance < 0.0)[0][0]
                     print(f"Encounter found between {satA.body_name} and {satX.body_name} at index {idx}")
-                    encounter_indeces.append(idx)
-        if len(encounter_indeces) > 0: self.force_truncate(np.array(encounter_indeces).min())
+                    encounter_indices.append(idx)
+        if len(encounter_indices) > 0: self.force_truncate(np.array(encounter_indices).min())
             
     def set_elements(self, kwargs: dict[str, float]):
         """
@@ -1739,22 +1749,26 @@ class Predict:
             elif satellite.orbit == "Hyperbolic":
                 self.solver = "Anomaly: Newton Solver"
                 # Adapted from https://orbital-mechanics.space/time-since-periapsis-and-keplers-equation/hyperbolic-trajectory-example.html
-                h = np.linalg.norm(self.__satellite.specific_angular_momentum)
-                t_0 = h**3 / self.__satellite.gparam**2 * 1 / (self.__satellite.e**2 - 1)**(3 / 2)
-                Mh_arr = self.__satellite.mean_angular_motion * (time_array - t_0)
+                print("Running Newton solver. Just a moment...")
+                F_0 = np.sign(self.__satellite.true_anomaly) * np.arccosh((self.__satellite.e + sp.cosdg(self.__satellite.true_anomaly)) / (1 + self.__satellite.e * sp.cosdg(self.__satellite.true_anomaly)))
+                Mh_0 = self.__satellite.e * np.sinh(F_0) - F_0
+                Mh_arr = self.__satellite.mean_angular_motion * (time_array) + Mh_0
                 hyp_anoms = np.full_like(time_array, np.nan)
                 for idx, M_h in enumerate(Mh_arr):
                     hyp_anoms[idx] = degrees(newton(
                         func=lambda F, M_h, e: e * np.sinh(F) - F - M_h,
                         fprime=lambda F, M_h, e: e * np.cosh(F) - 1,
                         fprime2=lambda F, M_h, e: e * np.sinh(F),
-                        x0=0, args=(M_h, self.__satellite.e)))
-                # Need to store the indeces where the anomaly is negative to accurately convert the hyperbolic to true anomaly
+                        args=(M_h, self.__satellite.e), x0=0, maxiter=150, tol=1e-10))
+                # Need to store the indices where the anomaly is negative to accurately convert the hyperbolic to true anomaly
                 # This also serves to establish an intuitive interpretation of where the satellite is along its trajectory with respect to pericenter
-                isneg = np.where(hyp_anoms > degrees(np.arccos(-1 / self.__satellite.e)))
-                hyp_anoms[isneg] -= 360
-                true_anoms = np.apply_along_axis(hyperbolic_2_true_anom, 0, np.abs(hyp_anoms), self.__satellite.e)
-                true_anoms[isneg] *= -1
+                if self.__satellite.radial_velocity < 0:
+                    isneg = np.greater(hyp_anoms, np.full_like(hyp_anoms, degrees(np.arccos(-1 / self.__satellite.e))))
+                    hyp_anoms[isneg] -= 360
+                    true_anoms = np.apply_along_axis(hyperbolic_2_true_anom, 0, np.abs(hyp_anoms), self.__satellite.e)
+                    true_anoms[isneg] *= -1
+                else:
+                    true_anoms = np.apply_along_axis(hyperbolic_2_true_anom, 0, hyp_anoms, self.__satellite.e)
                 self.__iternomaly(time_array, true_anoms)
         elif solver == "integrate":
             self.__integrate(time_array)
@@ -1767,9 +1781,10 @@ class Predict:
                 # Truncation is not necessary as the system SOI is assumed to approach infinity
                 pass
             else:
-                if np.any(np.nonzero(self.radial > np.full_like(self.time_array, self.__primary.SOI))):
-                    wrt_soi = np.greater(self.radial[:-1], np.full((len(self) - 1,), self.__primary.SOI))
-                    diff_radial = np.greater(np.diff(self.radial), np.zeros(len(self) - 1))
+                radial_vel = np.array([radial_velocity(pos, vel) for pos, vel in zip(self.local_coords, self.local_velocity)])
+                wrt_soi = np.greater(self.radial, np.full_like(self.time_array, self.__primary.SOI))
+                diff_radial = np.greater(radial_vel, np.zeros(len(self)))
+                if np.any(np.nonzero(np.logical_and(wrt_soi, diff_radial))):
                     idx = np.nonzero(np.logical_and(wrt_soi, diff_radial))[0][0]
                     print(f"Satellite {self.object} escapes primary {self.__primary.body.name} at time {time_array[idx] / timestep_conversion['days']} days")
                     self.truncate(idx)
@@ -1777,21 +1792,29 @@ class Predict:
             if isinstance(self.__primary, System):
                 if np.any(np.nonzero(self.radial < np.full_like(self.time_array, self.__primary.primary.radius))):
                     idx = np.where(self.radial < np.full_like(self.time_array, self.__primary.primary.radius))[0][0]
-                    self.truncate(idx)
                     print(f"Satellite {self.object} impacts primary {self.__primary.body.name} at time {time_array[idx] / timestep_conversion['days']} days")
+                    self.truncate(idx)
             else:
                 if np.any(np.nonzero(self.radial < np.full_like(self.time_array, self.__primary.radius))):
                     idx = np.where(self.radial < np.full_like(self.time_array, self.__primary.radius))[0][0]
-                    self.truncate(idx)
                     print(f"Satellite {self.object} impacts primary {self.__primary.body.name} at time {time_array[idx] / timestep_conversion['days']} days")
+                    self.truncate(idx)
 
     def __len__(self): return len(self.time_array)
-    def __repr__(self): return f"Predicted motion of {self.object}"
-    def __str__(self): return f"Predicted motion of {self.object}"
+    def __repr__(self): return f"Object: {self.object}\nSolver: {self.solver}\nTime: {self.time_array / timestep_conversion['days']} days\nTrue anomaly: {self.true_anomaly} degrees\nLocal position: {self.local_coords / AU} AU\nLocal velocity: {self.local_velocity / 1e3} km/s"
+    def __str__(self): return f"Object: {self.object}\nSolver: {self.solver}\nTime: {self.time_array / timestep_conversion['days']} days\nTrue anomaly: {self.true_anomaly} degrees\nLocal position: {self.local_coords / AU} AU\nLocal velocity: {self.local_velocity / 1e3} km/s"
         
     def keys(self): return ["object", "solver", "time_array", "true_anomaly", "local_coords", "local_velocity"]
-    def __getitem__(self, key): return getattr(self, key)
     def __setitem__(self, key, val): self[key] = value
+    def __getitem__(self, key): 
+        if isinstance(key, str): return getattr(self, key)
+        if isinstance(key, int):
+            subscr = deepcopy(self)
+            subscr.time_array = self.time_array[key]
+            subscr.true_anomaly = self.true_anomaly[key]
+            subscr.local_coords = self.local_coords[key]
+            subscr.local_velocity = self.local_velocity[key]
+            return subscr
         
     @property
     def radial(self) -> np.ndarray: return np.linalg.norm(self.local_coords, axis=1)
@@ -1814,10 +1837,11 @@ class Predict:
         """Internal function for iteration through true anomalies to compute state vectors"""
         self.time_array, self.true_anomaly = time_array, true_anoms
         self.local_coords, self.local_velocity = np.full((len(self), 3,), np.nan), np.full((len(self), 3,), np.nan)
-        keplerian_elements = {element:getattr(self.__satellite, element) for element in kepler}
+        keplerian_elements = {element: getattr(self.__satellite, element) for element in kepler}
         for idx, true_anom in enumerate(self.true_anomaly):
-            keplerian_elements["true_anomaly"] = true_anom
+            keplerian_elements["true_anomaly"] = true_anom if keplerian_elements["e"] < 1 else -true_anom
             self.local_coords[idx, :], self.local_velocity[idx, :] = keplerian_2_cartesian(self.__satellite.gparam, keplerian_elements)
+        if self.__satellite.e > 1: self.local_velocity *= -1
 
     def __integrate(self, time_array: np.ndarray):
         """Internal function for integration of state vectors"""
@@ -1827,8 +1851,6 @@ class Predict:
         solution = odeint(model_2BP, state, self.time_array, args=(self.__satellite.gparam * 1e-9, )) * 1e3
         local_coords, local_velocity = solution[:, :3], solution[:, 3:]
         self.true_anomaly = np.array([true_anom_from_vectors(pos, vel, self.__satellite.gparam) for pos, vel in zip(local_coords, local_velocity)])
-        radial_velocity = np.array([np.dot(pos, vel) for pos, vel in zip(unit(local_coords), local_velocity)])
-        self.true_anomaly[np.where(radial_velocity < 0)] *= -1 
         self.local_coords, self.local_velocity = local_coords, local_velocity
 
     def truncate(self, idx: int):
